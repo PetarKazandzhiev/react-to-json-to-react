@@ -1,364 +1,158 @@
 // src/pages/Home.jsx
-import React, { useState, useEffect, useRef } from "react";
-import TestRenderer from "react-test-renderer";
+import React, { useState, useEffect } from "react";
+// use the browser‐build of ReactDOMServer
+import { renderToStaticMarkup } from "react-dom/server";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import CustomInput from "@/components/CustomInput";
 
 /**
- * Turn *any* React element into a pure JSON tree:
- * { type: string, props: object, children: array }
- * by using react-test-renderer under the hood.
+ * Turn *any* React element into a JSON tree of HTML nodes:
+ *   { type: string, props: object, children: array }
  */
 function elementToJSON(element) {
-  console.log("elementToJSON: input element:", element);
+  // 1. render to HTML string
+  const html = renderToStaticMarkup(element);
 
-  // mount it in-memory
-  const testInst = TestRenderer.create(element);
-  let raw = testInst.toJSON();
-  console.log("elementToJSON: raw TestRenderer output:", raw);
+  // 2. parse it into a Document
+  const doc = new DOMParser().parseFromString(html, "text/html");
 
-  // handle fragments/arrays
-  if (Array.isArray(raw)) {
-    return raw.map((child) => elementToJSON(child));
+  // 3. grab the first element under <body>
+  const domNode = doc.body.firstElementChild;
+  if (!domNode) {
+    throw new Error("elementToJSON: no DOM node produced");
   }
 
-  // primitives
-  if (raw === null || typeof raw === "string" || typeof raw === "number") {
-    return raw;
-  }
-
-  // now raw is { type, props, children }
-  const { type, props, children } = raw;
-  const kids = Array.isArray(children) ? children : children ? [children] : [];
-
-  // recursively walk
-  const result = {
-    type,
-    props: { ...props },
-    children: kids.filter((c) => c != null).map((c) => elementToJSON(c)),
-  };
-  console.log("elementToJSON: result JSON node:", result);
-  return result;
+  // 4. walk it
+  return domToJson(domNode);
 }
 
-/**
- * Recursively converts JSON → React element (for preview).
- */
-function renderNode(node) {
-  if (typeof node === "string" || typeof node === "number") {
-    return node;
+function domToJson(node) {
+  // text node → string
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent;
   }
-  const { type, props = {}, children = [] } = node;
-
-  // normalize children
-  let kids = Array.isArray(children) ? children : [children];
-  if (kids.length === 0 && props.children != null) {
-    kids = Array.isArray(props.children) ? props.children : [props.children];
+  // only handle ELEMENT_NODE otherwise
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return null;
   }
 
-  // strip out children prop
-  const { children: _omit, ...rest } = props;
+  const type = node.tagName.toLowerCase();
+  const props = {};
 
-  // special-case <input> so we don't get void-element errors or controlled warnings
-  if (type === "input" && rest.value !== undefined) {
-    rest.defaultValue = rest.value;
-    delete rest.value;
+  // convert attributes → props
+  for (const attr of Array.from(node.attributes)) {
+    let name = attr.name;
+    if (name === "class") name = "className";
+    if (name === "for") name = "htmlFor";
+
+    if (name === "style") {
+      // build a proper style object
+      const styleObj = {};
+      for (const propName of node.style) {
+        styleObj[propName] = node.style.getPropertyValue(propName);
+      }
+      props.style = styleObj;
+    } else {
+      props[name] = attr.value;
+    }
   }
 
-  // create the element, spreading children only when present
-  const childEls = kids
-    .map((c, i) =>
-      typeof c === "object" ? React.cloneElement(renderNode(c), { key: i }) : c
-    )
-    .filter((c) => c != null);
-
-  return React.createElement(type, rest, ...childEls);
-}
-
-/**
- * Pretty‐print JSON → HTML‐like tree.
- */
-function printStructure(node, indent = 0) {
-  const pad = "  ".repeat(indent);
-  if (typeof node === "string" || typeof node === "number") {
-    return pad + node;
+  // children
+  const children = [];
+  for (const cn of Array.from(node.childNodes)) {
+    const childJson = domToJson(cn);
+    if (
+      childJson != null &&
+      // skip whitespace‐only text nodes
+      !(typeof childJson === "string" && childJson.trim() === "")
+    ) {
+      children.push(childJson);
+    }
   }
-  const { type, props = {}, children = [] } = node;
-  const attrs = Object.entries(props)
-    .filter(([, v]) => typeof v !== "object")
-    .map(([k, v]) => `${k}="${v}"`)
-    .join(" ");
-  const open = `<${type}${attrs ? " " + attrs : ""}>`;
-  const close = `</${type}>`;
-  const kids = Array.isArray(children) ? children : [children];
-  const inner = kids.map((c) => printStructure(c, indent + 1)).join("\n");
-  return [pad + open, inner, pad + close].join("\n");
-}
 
-/**
- * Detail‐card for one JSON component.
- */
-function ComponentDetails({ comp, onEdit, onDelete }) {
-  const { id, type, props = {}, children = [] } = comp;
-  return (
-    <div
-      style={{
-        border: "1px solid #ccc",
-        padding: "1rem",
-        marginBottom: "1rem",
-        borderRadius: "4px",
-      }}
-    >
-      <h3>
-        Component #{id}: <code>{type}</code>
-      </h3>
-
-      {/* Preview */}
-      <div
-        style={{
-          margin: "0.5rem 0",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-        }}
-      >
-        <strong style={{ marginBottom: "0.5rem" }}>Preview:</strong>
-        {renderNode(comp)}
-      </div>
-
-      {/* Structure */}
-      <div style={{ margin: "0.5rem 0" }}>
-        <strong>Structure:</strong>
-        <pre
-          style={{
-            background: "#000",
-            color: "#0f0",
-            padding: "0.5rem",
-            overflowX: "auto",
-          }}
-        >
-          {printStructure(comp)}
-        </pre>
-      </div>
-
-      {/* Props */}
-      <div style={{ margin: "0.5rem 0" }}>
-        <strong>Props:</strong>
-        {Object.keys(props).length === 0 ? (
-          <p>
-            <em>None</em>
-          </p>
-        ) : (
-          <ul>
-            {Object.entries(props).map(([k, v]) => (
-              <li key={k}>
-                <code>{k}</code>:{" "}
-                {typeof v === "object" ? JSON.stringify(v) : v.toString()}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Styles */}
-      {props.style && (
-        <div style={{ margin: "0.5rem 0" }}>
-          <strong>Styles:</strong>
-          <ul>
-            {Object.entries(props.style).map(([k, v]) => (
-              <li key={k}>
-                <code>{k}</code>: {v}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Children summary */}
-      <div style={{ margin: "0.5rem 0" }}>
-        <strong>Children:</strong>{" "}
-        {children.length === 0 ? (
-          <em>None</em>
-        ) : (
-          <ul>
-            {children.map((c, i) => (
-              <li key={i}>
-                {typeof c === "object"
-                  ? `<${c.type}>…</${c.type}>`
-                  : JSON.stringify(c)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Edit/Delete */}
-      <div style={{ marginTop: "0.5rem" }}>
-        <button onClick={() => onEdit(id)}>Edit</button>{" "}
-        <button onClick={() => onDelete(id)}>Delete</button>
-      </div>
-    </div>
-  );
+  return { type, props, children };
 }
 
 export default function Home() {
   const [components, setComponents] = useState([]);
   const [sampleType, setSampleType] = useState("button");
 
-  // inline‐editor state
-  const [editingId, setEditingId] = useState(null);
-  const [editingValue, setEditingValue] = useState("");
-  const editorRef = useRef(null);
-
-  // initial fetch
+  // fetch saved JSON on mount
   useEffect(() => {
-    console.log("Home: fetching initial components");
-    (async () => {
-      try {
-        const res = await fetch("http://localhost:4000/api/components");
-        const data = await res.json();
-        console.log("Home: initial components:", data);
-        setComponents(data);
-      } catch (err) {
-        console.error("Home: fetch error:", err);
-      }
-    })();
-  }, []);
-
-  const fetchComponents = async () => {
-    console.log("Home: re-fetching components");
-    try {
-      const res = await fetch("http://localhost:4000/api/components");
-      const data = await res.json();
-      console.log("Home: re-fetched components:", data);
-      setComponents(data);
-    } catch (err) {
-      console.error("Home: re-fetch error:", err);
-    }
-  };
-
-  const createSample = () => {
-    console.log("Home: creating sample of type:", sampleType);
-    let element;
-    if (sampleType === "button") {
-      element = <Button label="Click Me" />;
-    } else if (sampleType === "card") {
-      element = (
-        <Card
-          title="Sample Card"
-          content="This is a card created from the real component."
-          tags={["demo", "test"]}
-          footer="Card Footer"
-          actions={[
-            { label: "OK", onClick: () => alert("OK!") },
-            { label: "Cancel", onClick: () => alert("Canceled!") },
-          ]}
-          style={{ maxWidth: 300 }}
-        >
-          <small>Extra child content</small>
-        </Card>
-      );
-    } else {
-      element = (
-        <CustomInput
-          value=""
-          placeholder="Type here"
-          style={{ border: "1px solid #007acc" }}
-        />
-      );
-    }
-
-    // flatten ANY component into JSON
-    const body = elementToJSON(element);
-    console.log("Home: POST body:", body);
-
-    fetch("http://localhost:4000/api/components", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
+    fetch("http://localhost:4000/api/components")
       .then((res) => {
-        console.log("Home: createSample status:", res.status);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then((json) => {
-        console.log("Home: created:", json);
-        fetchComponents();
-      })
-      .catch((err) => console.error("Home: createSample error:", err));
-  };
+      .then(setComponents)
+      .catch((err) => console.error("Home: fetch error:", err));
+  }, []);
 
-  const editComponent = (id) => {
-    console.log("Home: editComponent id =", id);
-    const comp = components.find((c) => c.id === id);
-    console.log("Home: editing data:", comp);
-    setEditingId(id);
-    setEditingValue(JSON.stringify(comp, null, 2));
-  };
-
-  useEffect(() => {
-    if (editingId != null && editorRef.current) {
-      console.log("Home: scrolling editor into view:", editingId);
-      editorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  // create + POST
+  const createSample = async () => {
+    let element;
+    switch (sampleType) {
+      case "button":
+        element = <Button label="Click Me" style={{ margin: "0.5rem" }} />;
+        break;
+      case "card":
+        element = (
+          <Card
+            title="Sample Card"
+            content="This is a demo card."
+            tags={["demo", "test"]}
+            footer="Footer text"
+            style={{ border: "1px solid #ccc", padding: "1rem" }}
+          >
+            <small>Extra child</small>
+          </Card>
+        );
+        break;
+      default:
+        element = (
+          <CustomInput
+            value=""
+            placeholder="Type here"
+            style={{ border: "1px solid #007acc" }}
+          />
+        );
     }
-  }, [editingId]);
 
-  const saveEdit = async () => {
-    console.log("Home: saveEdit id =", editingId);
+    // build JSON from DOM
+    let json;
     try {
-      const parsed = JSON.parse(editingValue);
-      console.log("Home: PUT body:", parsed);
-      const res = await fetch(
-        `http://localhost:4000/api/components/${editingId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsed),
-        }
-      );
-      console.log("Home: saveEdit status:", res.status);
-      await fetchComponents();
+      json = elementToJSON(element);
     } catch (err) {
-      console.error("Home: saveEdit error:", err);
-      alert("Invalid JSON");
-    } finally {
-      setEditingId(null);
-      setEditingValue("");
+      console.error("Home: elementToJSON error:", err);
+      return;
     }
-  };
 
-  const cancelEdit = () => {
-    console.log("Home: cancelEdit id =", editingId);
-    setEditingId(null);
-    setEditingValue("");
-  };
-
-  const deleteComponent = (id) => {
-    console.log("Home: deleteComponent id =", id);
-    fetch(`http://localhost:4000/api/components/${id}`, {
-      method: "DELETE",
-    })
-      .then((res) => {
-        console.log("Home: deleted status:", res.status);
-        fetchComponents();
-      })
-      .catch((err) => console.error("Home: delete error:", err));
+    // POST it
+    try {
+      const res = await fetch("http://localhost:4000/api/components", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(json),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved = await res.json();
+      setComponents((prev) => [...prev, saved]);
+    } catch (err) {
+      console.error("Home: save error:", err);
+    }
   };
 
   return (
     <div>
       <h2>⎈ Home / Manage Components</h2>
-      {/* Sample creator */}
+
       <div style={{ marginBottom: "1rem" }}>
         <label>
           Pick sample:{" "}
           <select
             value={sampleType}
-            onChange={(e) => {
-              console.log("Home: sampleType →", e.target.value);
-              setSampleType(e.target.value);
-            }}
+            onChange={(e) => setSampleType(e.target.value)}
           >
             <option value="button">Button</option>
             <option value="card">Card</option>
@@ -368,43 +162,24 @@ export default function Home() {
         <button onClick={createSample}>Create Sample</button>
       </div>
 
-      {/* Inline editor */}
-      {components.map((c) => (
-        <React.Fragment key={c.id}>
-          {editingId === c.id && (
-            <div
-              ref={editorRef}
-              style={{
-                marginBottom: "1rem",
-                border: "1px solid #888",
-                padding: "1rem",
-              }}
-            >
-              <h3>Edit Component #{c.id}</h3>
-              <textarea
-                rows={10}
-                style={{ width: "100%", fontFamily: "monospace" }}
-                value={editingValue}
-                onChange={(e) => {
-                  console.log("Home: editingValue changed");
-                  setEditingValue(e.target.value);
-                }}
-              />
-              <div>
-                <button onClick={saveEdit}>Save</button>{" "}
-                <button onClick={cancelEdit}>Cancel</button>
-              </div>
-            </div>
-          )}
-          <ComponentDetails
-            comp={c}
-            onEdit={editComponent}
-            onDelete={deleteComponent}
-          />
-        </React.Fragment>
-      ))}
-
-      {components.length === 0 && <p>No components yet. Create one above.</p>}
+      <h3>Saved JSON</h3>
+      {components.length === 0 ? (
+        <p>No components yet.</p>
+      ) : (
+        components.map((c) => (
+          <pre
+            key={c.id}
+            style={{
+              background: "black",
+              color: "green",
+              padding: "1rem",
+              overflowX: "auto",
+            }}
+          >
+            {JSON.stringify(c, null, 2)}
+          </pre>
+        ))
+      )}
     </div>
   );
 }
