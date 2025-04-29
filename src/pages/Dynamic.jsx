@@ -9,9 +9,15 @@ function renderNode(node) {
   if (node == null || typeof node === "string" || typeof node === "number") {
     return node;
   }
-  const { type, props = {}, children = [] } = node;
+  //const { type, props = {}, children = [] } = node;
 
   // normalize children → array, strip nulls, recurse
+  const type = node.type || node.component;
+
+  const props = node.props || node.webProps || {};
+
+  const children = node.children || [];
+
   const kids = (Array.isArray(children) ? children : [children])
     .filter((c) => c != null)
     .map((c, i) =>

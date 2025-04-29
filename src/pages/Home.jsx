@@ -6,9 +6,70 @@ import Button from "@/components/Button";
 import Card from "@/components/Card";
 import CustomInput from "@/components/CustomInput";
 
+// Map HTML tags to React Native equivalents
+const rnComponentMap = {
+  // Layout
+  div: "View",
+  span: "Text",
+  p: "Text",
+  h1: "Text",
+  h2: "Text",
+  h3: "Text",
+  h4: "Text",
+  h5: "Text",
+  h6: "Text",
+  header: "View",
+  footer: "View",
+  section: "View",
+  article: "View",
+  nav: "View",
+  main: "View",
+  aside: "View",
+  figure: "View",
+  figcaption: "Text",
+
+  // List
+  ul: "View",
+  ol: "View",
+  li: "Text",
+  button: "TouchableOpacity",
+  input: "TextInput",
+  textarea: "TextInput",
+  select: "Picker",
+  option: "Picker.Item",
+  label: "Text",
+
+  // Media
+  img: "Image",
+  video: "Video", // requires react-native-video
+  audio: "Audio", // custom or community module
+  canvas: "ART.Surface", // via react-native ART or react-native-svg
+  svg: "Svg", // via react-native-svg
+
+  // Table (fallback to Views)
+  table: "View",
+  thead: "View",
+  tbody: "View",
+  tr: "View",
+  th: "Text",
+  td: "Text",
+
+  // Form
+  form: "View",
+
+  // Semantic
+  small: "Text",
+  strong: "Text",
+  em: "Text",
+  blockquote: "View",
+  code: "Text",
+  pre: "Text",
+  a: "Text",
+};
+
 /**
- * Turn *any* React element into a JSON tree of HTML nodes:
- *   { type: string, props: object, children: array }
+ * Turn *any* React element into a JSON tree containing both web and RN component info:
+ *   { component, nativeComponent, webProps, rnProps, children }
  */
 function elementToJSON(element) {
   // 1. render to HTML string
@@ -37,12 +98,15 @@ function domToJson(node) {
     return null;
   }
 
-  const type = node.tagName.toLowerCase();
-  const props = {};
+  const component = node.tagName.toLowerCase();
+  const nativeComponent = rnComponentMap[component] || component;
+  const webProps = {};
+  const rnProps = {};
 
-  // convert attributes → props
+  // convert attributes → webProps and copy to rnProps for further mapping
   for (const attr of Array.from(node.attributes)) {
     let name = attr.name;
+    let value = attr.value;
     if (name === "class") name = "className";
     if (name === "for") name = "htmlFor";
 
@@ -52,9 +116,11 @@ function domToJson(node) {
       for (const propName of node.style) {
         styleObj[propName] = node.style.getPropertyValue(propName);
       }
-      props.style = styleObj;
+      webProps.style = styleObj;
+      rnProps.style = styleObj; // RN style object
     } else {
-      props[name] = attr.value;
+      webProps[name] = value;
+      rnProps[name] = value; // placeholder, rename in RN conversion
     }
   }
 
@@ -71,7 +137,13 @@ function domToJson(node) {
     }
   }
 
-  return { type, props, children };
+  return {
+    component,
+    nativeComponent,
+    webProps,
+    rnProps,
+    children,
+  };
 }
 
 export default function Home() {
