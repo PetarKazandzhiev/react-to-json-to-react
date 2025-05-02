@@ -40,6 +40,18 @@ function renderNode(node, key) {
   const { nativeComponent, rnProps = {}, children = [] } = node;
   const Component = componentMap[nativeComponent] || View;
 
+  // Move a `value` into defaultValue so TextInput isn't a controlled component without onChange
+  if (nativeComponent === "TextInput" && rnProps.value != null) {
+    rnProps.defaultValue = rnProps.value;
+    delete rnProps.value;
+  }
+
+  // Void elements: TextInput, Image, Picker.Item — render without children
+  const voidTags = new Set(["TextInput", "Image", "Picker.Item"]);
+  if (voidTags.has(nativeComponent)) {
+    return <Component key={key} {...rnProps} />;
+  }
+
   // Normalize children to an array and recurse
   const kids = (Array.isArray(children) ? children : [children]).map(
     (child, i) => renderNode(child, `${key}-${i}`)

@@ -18,6 +18,11 @@ function renderNode(node) {
 
   const children = node.children || [];
 
+  if ((type === "input" || type === "textarea") && props.value != null) {
+    props.defaultValue = props.value;
+    delete props.value;
+  }
+
   const kids = (Array.isArray(children) ? children : [children])
     .filter((c) => c != null)
     .map((c, i) =>
