@@ -8,7 +8,6 @@ import CustomInput from "@/components/CustomInput";
 
 // Map HTML tags to React Native equivalents
 const rnComponentMap = {
-  // Layout
   div: "View",
   span: "Text",
   p: "Text",
@@ -27,8 +26,6 @@ const rnComponentMap = {
   aside: "View",
   figure: "View",
   figcaption: "Text",
-
-  // List
   ul: "View",
   ol: "View",
   li: "Text",
@@ -38,26 +35,18 @@ const rnComponentMap = {
   select: "Picker",
   option: "Picker.Item",
   label: "Text",
-
-  // Media
   img: "Image",
-  video: "Video", // requires react-native-video
-  audio: "Audio", // custom or community module
-  canvas: "ART.Surface", // via react-native ART or react-native-svg
-  svg: "Svg", // via react-native-svg
-
-  // Table (fallback to Views)
+  video: "Video",
+  audio: "Audio",
+  canvas: "ART.Surface",
+  svg: "Svg",
   table: "View",
   thead: "View",
   tbody: "View",
   tr: "View",
   th: "Text",
   td: "Text",
-
-  // Form
   form: "View",
-
-  // Semantic
   small: "Text",
   strong: "Text",
   em: "Text",
@@ -67,158 +56,150 @@ const rnComponentMap = {
   a: "Text",
 };
 
-/**
- * Turn *any* React element into a JSON tree containing both web and RN component info:
- *   { component, nativeComponent, webProps, rnProps, children }
- */
+// serialize React element to JSON
 function elementToJSON(element) {
-  // 1. render to HTML string
   const html = renderToStaticMarkup(element);
-
-  // 2. parse it into a Document
   const doc = new DOMParser().parseFromString(html, "text/html");
-
-  // 3. grab the first element under <body>
-  const domNode = doc.body.firstElementChild;
-  if (!domNode) {
-    throw new Error("elementToJSON: no DOM node produced");
-  }
-
-  // 4. walk it
-  return domToJson(domNode);
+  const node = doc.body.firstElementChild;
+  if (!node) throw new Error("elementToJSON: no DOM node");
+  return domToJson(node);
 }
 
 function domToJson(node) {
-  // text node → string
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent;
-  }
-  // only handle ELEMENT_NODE otherwise
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return null;
-  }
-
-  const component = node.tagName.toLowerCase();
-  const nativeComponent = rnComponentMap[component] || component;
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  const type = node.tagName.toLowerCase();
+  const nativeComponent = rnComponentMap[type] || type;
   const webProps = {};
   const rnProps = {};
-
-  // convert attributes → webProps and copy to rnProps for further mapping
-  for (const attr of Array.from(node.attributes)) {
+  for (let attr of Array.from(node.attributes)) {
     let name = attr.name;
-    let value = attr.value;
+    const val = attr.value;
     if (name === "class") name = "className";
     if (name === "for") name = "htmlFor";
-
     if (name === "style") {
-      // build a proper style object
       const styleObj = {};
-      for (const propName of node.style) {
-        styleObj[propName] = node.style.getPropertyValue(propName);
+      for (let key of node.style) {
+        const raw = node.style.getPropertyValue(key);
+        const camel = key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        styleObj[camel] = raw;
+        // RN parsing skipped here for brevity
+        rnProps.style = styleObj;
       }
       webProps.style = styleObj;
-      rnProps.style = styleObj; // RN style object
     } else {
-      webProps[name] = value;
-      rnProps[name] = value; // placeholder, rename in RN conversion
+      webProps[name] = val;
+      rnProps[name] = val;
     }
   }
-
-  // children
   const children = [];
-  for (const cn of Array.from(node.childNodes)) {
-    const childJson = domToJson(cn);
-    if (
-      childJson != null &&
-      // skip whitespace‐only text nodes
-      !(typeof childJson === "string" && childJson.trim() === "")
-    ) {
-      children.push(childJson);
-    }
+  for (let cn of Array.from(node.childNodes)) {
+    const cjson = domToJson(cn);
+    if (cjson != null && !(typeof cjson === "string" && cjson.trim() === ""))
+      children.push(cjson);
   }
-
-  return {
-    component,
-    nativeComponent,
-    webProps,
-    rnProps,
-    children,
-  };
+  return { type, webProps, children, nativeComponent, rnProps };
 }
 
 export default function Home() {
   const [components, setComponents] = useState([]);
   const [sampleType, setSampleType] = useState("button");
 
-  // fetch saved JSON on mount
+  // load saved JSON
   useEffect(() => {
     fetch("http://localhost:4000/api/components")
       .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(res.status);
         return res.json();
       })
       .then(setComponents)
-      .catch((err) => console.error("Home: fetch error:", err));
+      .catch((err) => console.error("Home fetch error:", err));
   }, []);
 
   // create + POST
   const createSample = async () => {
     let element;
-    switch (sampleType) {
-      case "button":
-        element = <Button label="Click Me" style={{ margin: "0.5rem" }} />;
-        break;
-      case "card":
-        element = (
-          <Card
-            title="Sample Card"
-            content="This is a demo card."
-            tags={["demo", "test"]}
-            footer="Footer text"
-            style={{ border: "1px solid #ccc", padding: "1rem" }}
-          >
-            <small>Extra child</small>
-          </Card>
-        );
-        break;
-      default:
-        element = (
-          <CustomInput
-            value=""
-            placeholder="Type here"
-            style={{ border: "1px solid #007acc" }}
-          />
-        );
+    if (sampleType === "button") {
+      element = <Button label="Click Me" style={{ margin: "8px" }} />;
+    } else if (sampleType === "card") {
+      element = (
+        <Card
+          title="Sample Card"
+          content="This is a demo card."
+          tags={["demo", "test"]}
+          footer="Footer text"
+          style={{ border: "1px solid #ccc", padding: "16px" }}
+        >
+          <small>Extra child</small>
+        </Card>
+      );
+    } else {
+      element = (
+        <CustomInput
+          value=""
+          placeholder="Type here"
+          style={{ border: "1px solid #007acc" }}
+        />
+      );
     }
-
-    // build JSON from DOM
-    let json;
     try {
-      json = elementToJSON(element);
-    } catch (err) {
-      console.error("Home: elementToJSON error:", err);
-      return;
-    }
-
-    // POST it
-    try {
+      const json = elementToJSON(element);
       const res = await fetch("http://localhost:4000/api/components", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(json),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(res.status);
       const saved = await res.json();
       setComponents((prev) => [...prev, saved]);
     } catch (err) {
-      console.error("Home: save error:", err);
+      console.error("Home save error:", err);
+    }
+  };
+
+  // delete handler
+  const deleteItem = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this item?")) return;
+    try {
+      const res = await fetch(`http://localhost:4000/api/components/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(res.status);
+      setComponents((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      console.error("Delete error:", err);
+    }
+  };
+
+  // edit handler
+  const editItem = async (item) => {
+    const text = window.prompt(
+      "Edit component JSON:",
+      JSON.stringify(item, null, 2)
+    );
+    if (!text) return;
+    try {
+      const updated = JSON.parse(text);
+      const res = await fetch(
+        `http://localhost:4000/api/components/${item.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        }
+      );
+      if (!res.ok) throw new Error(res.status);
+      const saved = await res.json();
+      setComponents((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+    } catch (err) {
+      console.error("Edit error:", err);
+      alert("Invalid JSON or update failed.");
     }
   };
 
   return (
     <div>
       <h2>⎈ Home / Manage Components</h2>
-
       <div style={{ marginBottom: "1rem" }}>
         <label>
           Pick sample:{" "}
@@ -230,7 +211,7 @@ export default function Home() {
             <option value="card">Card</option>
             <option value="input">CustomInput</option>
           </select>
-        </label>{" "}
+        </label>
         <button onClick={createSample}>Create Sample</button>
       </div>
 
@@ -239,17 +220,23 @@ export default function Home() {
         <p>No components yet.</p>
       ) : (
         components.map((c) => (
-          <pre
+          <div
             key={c.id}
             style={{
-              background: "black",
-              color: "green",
+              background: "#000",
+              color: "#0f0",
               padding: "1rem",
-              overflowX: "auto",
+              marginBottom: "1rem",
             }}
           >
-            {JSON.stringify(c, null, 2)}
-          </pre>
+            <pre style={{ overflowX: "auto" }}>
+              {JSON.stringify(c, null, 2)}
+            </pre>
+            <button onClick={() => editItem(c)} style={{ marginRight: "8px" }}>
+              Edit
+            </button>
+            <button onClick={() => deleteItem(c.id)}>Delete</button>
+          </div>
         ))
       )}
     </div>

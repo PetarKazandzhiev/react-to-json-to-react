@@ -81,7 +81,14 @@ export default function RNDynamic() {
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
-      <Text style={{ fontSize: 22, fontWeight: "bold", marginBottom: 12 }}>
+      <Text
+        style={{
+          fontSize: 22,
+          fontWeight: "bold",
+          marginBottom: 12,
+          color: "#fff",
+        }}
+      >
         📱 React Native Dynamic Renderer
       </Text>
 
